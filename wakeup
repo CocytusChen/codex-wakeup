@@ -1,0 +1,6 @@
+#!/usr/bin/env python3
+"""Run without installing dependencies; uv installation also exposes codex-wakeup."""
+
+from codex_wakeup.cli import main
+
+raise SystemExit(main())

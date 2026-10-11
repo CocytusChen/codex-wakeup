@@ -1,0 +1,42 @@
+[project]
+name = "codex-wakeup"
+version = "0.5.0"
+description = "Validated timer, command and process-exit wake-ups, with CLI and MCP"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+license = "MIT"
+classifiers = [
+  "Operating System :: POSIX :: Linux",
+  "Programming Language :: Python :: 3",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+]
+
+[project.optional-dependencies]
+mcp = ["mcp>=2.3,<3"]
+
+[project.scripts]
+codex-wakeup = "codex_wakeup.cli:main"
+codex-wakeup-mcp = "codex_wakeup.mcp_server:main"
+codex-wakeup-wait = "codex_wakeup.waiting:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["codex_wakeup"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+  "/codex_wakeup", "/tests", "/docs", "/README.md", "/AGENTS.md",
+  "/LICENSE", "/pyproject.toml", "/wakeup", "/wait_control.py", "/install.sh", "/.gitignore",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+extend-exclude = ["notes", "local"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
