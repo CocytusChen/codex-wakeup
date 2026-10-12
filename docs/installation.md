@@ -29,6 +29,8 @@ This installs `uv` if needed, supplies Python 3.12, installs the package with MC
 dependencies, and registers `codex_wakeup` using the installed executable's
 absolute path. It also displays the saved MCP configuration. No administrator
 privileges are needed. The installed package is independent of this source folder.
+The registration includes the package version in the server environment so
+configuration refresh can distinguish an upgraded server at the same executable path.
 
 ### 3. Open or reopen Codex
 
@@ -88,7 +90,7 @@ With `uv` already installed, the equivalent package and registration steps are:
 
 ```sh
 uv tool install --python 3.12 '.[mcp]'
-codex mcp add codex_wakeup -- "$(uv tool dir --bin)/codex-wakeup-mcp"
+codex mcp add codex_wakeup --env CODEX_WAKEUP_VERSION=0.5.0 -- "$(uv tool dir --bin)/codex-wakeup-mcp"
 codex mcp get codex_wakeup
 ```
 

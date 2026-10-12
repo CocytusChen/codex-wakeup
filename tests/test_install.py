@@ -88,7 +88,15 @@ else:
         registration = next(c for c in calls if c["args"][:2] == ["mcp", "add"])
         self.assertEqual(
             registration["args"],
-            ["mcp", "add", "codex_wakeup", "--", str(self.installed / "codex-wakeup-mcp")],
+            [
+                "mcp",
+                "add",
+                "codex_wakeup",
+                "--env",
+                "CODEX_WAKEUP_VERSION=0.5.0",
+                "--",
+                str(self.installed / "codex-wakeup-mcp"),
+            ],
         )
         self.assertEqual(calls[-1]["args"], ["mcp", "get", "codex_wakeup"])
         self.assertTrue(all(c["args"][:2] != ["app-server", "daemon"] for c in calls))

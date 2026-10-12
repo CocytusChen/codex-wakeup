@@ -41,7 +41,12 @@ if [[ "$mcp_command" != /* || ! -x "$mcp_command" ]]; then
     printf 'The installed MCP executable is unavailable: %s\n' "$mcp_command" >&2
     exit 1
 fi
-codex mcp add codex_wakeup -- "$mcp_command"
+tool_version="$(sed -n 's/^version = "\([^"]*\)"$/\1/p' "$project_dir/pyproject.toml")"
+if [[ ! "$tool_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    printf 'The package version is unavailable.\n' >&2
+    exit 1
+fi
+codex mcp add codex_wakeup --env "CODEX_WAKEUP_VERSION=$tool_version" -- "$mcp_command"
 codex mcp get codex_wakeup
 
 printf '\nInstalled and registered. Start or reopen a Codex conversation and check /mcp.\n'
