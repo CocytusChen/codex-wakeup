@@ -17,6 +17,9 @@ waits and Codex message delivery.
 - Default queue delivery hands each input to Codex. Single jobs exit on acceptance;
   finite timers retain one worker through their original schedule. Steer
   delegates active-turn redirection to Codex. Do not poll for idle queue delivery.
+- Optional repeated-timer `replace_pending` removes only older queued inputs of
+  the same job after new acceptance. Preserve deletion uncertainty; never recall
+  active work or delete unrelated input. Accepted submission remains settled.
 - Cancel untriggered work, including the remaining occurrences of a timer series.
   Preserve prior accepted/uncertain receipts. Owned commands can be stopped; observed
   processes remain untouched. Keep process identity and cancellation race checks.

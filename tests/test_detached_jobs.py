@@ -24,6 +24,7 @@ class FakeDaemon:
         self.path = self.root / "control.sock"
         self.sent = []
         self.calls = []
+        self.queued, self.deleted = [], []
         self.active = True
         self.stop = threading.Event()
         self.socket = socket.socket(socket.AF_UNIX)
@@ -98,7 +99,15 @@ class FakeDaemon:
                         else []
                     }
                 elif method == "thread/queue/list":
-                    result = {"data": []}
+                    queued = [
+                        q for q in self.queued if q["threadId"] == message["params"]["threadId"]
+                    ]
+                    offset = int(message["params"].get("cursor", 0))
+                    end = offset + message["params"]["limit"]
+                    result = {
+                        "data": queued[offset:end],
+                        "nextCursor": str(end) if end < len(queued) else None,
+                    }
                 elif method == "thread/queue/add":
                     self.sent.append(message)
                     result = {
@@ -108,6 +117,23 @@ class FakeDaemon:
                             "input": message["params"]["input"],
                         }
                     }
+                    self.queued.append(
+                        result["queuedSubmission"] | {"threadId": message["params"]["threadId"]}
+                    )
+                elif method == "thread/queue/delete":
+                    item = next(
+                        (
+                            q
+                            for q in self.queued
+                            if q["threadId"] == message["params"]["threadId"]
+                            and q["id"] == message["params"]["queuedSubmissionId"]
+                        ),
+                        None,
+                    )
+                    if item:
+                        self.queued.remove(item)
+                        self.deleted.append(item)
+                    result = {"deleted": bool(item)}
                 elif method == "turn/steer":
                     self.sent.append(message)
                     result = {"turnId": "fake-active"}
@@ -291,6 +317,17 @@ class DetachedJobTest(unittest.TestCase):
         self.assertEqual(cancelled["job"]["timer"]["cancelled"], 4)
         self.wait_for(job, lambda v: not self.worker_alive(v))
         self.assertEqual(len(self.daemon.sent), 1)
+
+    def test_repeated_timer_replaces_pending_inputs_after_acceptance(self):
+        job = self.submit({"type": "timer", "after": "1s", "count": 3, "replace_pending": True})
+        value = self.wait_for(job, lambda v: v["timer"]["completed"] == 3)
+        self.wait_for(job, lambda v: not self.worker_alive(v))
+        self.assertEqual(value["timer"]["accepted"], 3)
+        self.assertEqual(value["timer"]["replaced"], 2)
+        self.assertEqual(len(self.daemon.queued), 1)
+        self.assertEqual(self.daemon.queued[0]["clientUserMessageId"], f"{job}-3")
+        self.assertTrue(self.daemon.active)
+        self.assertNotIn("Target:", self.daemon.sent[-1]["params"]["input"][0]["text"])
 
     def test_command_cancel_settles_owned_group(self):
         job = self.command("import time; time.sleep(30)")

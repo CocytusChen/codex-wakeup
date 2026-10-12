@@ -53,6 +53,8 @@ Example arguments for MCP `wakeup`:
 ```
 
 This schedules hours 1 through 10 under one job; cancel it to stop the remainder.
+Add `"replace_pending": true` to the trigger to replace older queued reminders of
+that series after each new reminder is accepted. Active work is never interrupted.
 After submission, end your turn when ready to wait. The tool handles delivery.
 Each operation acts only on the calling conversation's jobs.
 `queue` is the default; `steer` redirects active work through native Codex steering.

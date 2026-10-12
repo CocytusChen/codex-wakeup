@@ -64,6 +64,11 @@ class MCPTest(unittest.TestCase):
                             ]["default"],
                             1,
                         )
+                        self.assertFalse(
+                            tools["wakeup"].input_schema["$defs"]["TimerTrigger"]["properties"][
+                                "replace_pending"
+                            ]["default"]
+                        )
                         for name, args in [
                             (
                                 "wakeup",
@@ -88,6 +93,31 @@ class MCPTest(unittest.TestCase):
                             {"resume_approval": "never"},
                             {"trigger": {"type": "timer", "after": "1h", "count": True}},
                             {"trigger": {"type": "timer", "after": "1h", "count": "10"}},
+                            {
+                                "trigger": {
+                                    "type": "timer",
+                                    "after": "1h",
+                                    "count": 10,
+                                    "replace_pending": "true",
+                                }
+                            },
+                            {
+                                "trigger": {
+                                    "type": "timer",
+                                    "after": "1h",
+                                    "count": 1,
+                                    "replace_pending": True,
+                                }
+                            },
+                            {
+                                "busy": "steer",
+                                "trigger": {
+                                    "type": "timer",
+                                    "after": "1h",
+                                    "count": 10,
+                                    "replace_pending": True,
+                                },
+                            },
                         ]:
                             refused = await self.call(
                                 client,
@@ -106,7 +136,12 @@ class MCPTest(unittest.TestCase):
                                 "wakeup",
                                 {
                                     "message": "fixture timer",
-                                    "trigger": {"type": "timer", "after": "1h", "count": 10},
+                                    "trigger": {
+                                        "type": "timer",
+                                        "after": "1h",
+                                        "count": 10,
+                                        "replace_pending": True,
+                                    },
                                 },
                                 thread,
                             )

@@ -64,6 +64,13 @@ completion can run queued input, while an interrupted turn or unloaded
 conversation can retain it until Codex resumes processing. Acceptance is not proof
 that the model ran the message or finished the requested task.
 
+Repeated timers can opt into `replace_pending`. After a new queue acceptance is
+saved, the worker lists the queue and deletes only older submission identities of
+its own series. Listing finishes before deletions to avoid shifting pagination.
+The per-occurrence receipt retains confirmed removals, already absent inputs and
+any uncertain deletion. The new acceptance remains settled even if cleanup fails.
+This does not interrupt dispatched work or guarantee atomic queue replacement.
+
 Steer can redirect active inference before the turn finishes. Codex controls
 preemption and running-tool behavior; it continues the same active turn. Steering
 requires a loaded conversation.

@@ -309,6 +309,7 @@ def schedule(
     after=None,
     at=None,
     count=1,
+    replace_pending=False,
     title="Background wake-up",
     busy="queue",
     dry_run=False,
@@ -321,6 +322,12 @@ def schedule(
         raise ToolError("invalid_count", "Timer count must be a positive integer.")
     if count > 1 and after is None:
         raise ToolError("invalid_time", "Repeated timers require after as their interval.")
+    if not isinstance(replace_pending, bool):
+        raise ToolError("invalid_arguments", "replace_pending must be true or false.")
+    if replace_pending and (count <= 1 or busy != "queue"):
+        raise ToolError(
+            "invalid_replace_pending", "replace_pending requires count > 1 and busy=queue."
+        )
     delay = duration(after) if after is not None else None
     planned = absolute_time(at) if at is not None else None
     if (
@@ -377,6 +384,8 @@ def schedule(
             "failed": 0,
             "uncertain": 0,
             "cancelled": 0,
+            "replace_pending": replace_pending,
+            "replaced": 0,
             "receipts_directory": str(store.root / "deliveries" / job["id"]),
         }
     manager.verify(job)
@@ -397,7 +406,7 @@ def schedule(
 def wake_message(job, store):
     execution = job.get("execution")
     message = (
-        f"[From: Codex Wake-up Scheduler | Job: {job['id']} | Target: {job['thread_id']}]\n\n"
+        f"[From: Codex Wake-up Scheduler | Job: {job['id']}]\n\n"
         f"Background event: {job['title']}\n\n{job['instructions']}"
     )
     if timer := job.get("timer"):
@@ -440,6 +449,69 @@ def delivery_identity(job):
     return f"{job['id']}-{timer['completed'] + 1}" if timer else job["id"]
 
 
+def replace_queued_reminders(client, store, job):
+    """Best-effort removal after new acceptance; never recall active work or other jobs."""
+    state = {"status": "running", "removed": [], "not_pending": []}
+    job["delivery"]["queue_replacement"] = state
+    store.save(job)
+    try:
+        prefix = job["id"] + "-"
+        current = job["timer"]["completed"] + 1
+        candidates, cursors, identities = [], set(), set()
+        cursor = None
+        while True:
+            params = {"threadId": job["thread_id"], "limit": 100}
+            if cursor is not None:
+                params["cursor"] = cursor
+            page = client.rpc("thread/queue/list", params)
+            if not isinstance(page.get("data"), list):
+                raise ValueError("Queue listing lacks submission data")
+            for item in page["data"]:
+                submission = item.get("clientUserMessageId", "")
+                if not isinstance(submission, str) or not submission.startswith(prefix):
+                    continue
+                suffix = submission[len(prefix) :]
+                if not suffix.isascii() or not suffix.isdecimal():
+                    continue
+                index = int(suffix)
+                if not 1 <= index < current or submission != f"{prefix}{index}":
+                    continue
+                queue_id = item.get("id")
+                if not isinstance(queue_id, str) or not queue_id:
+                    raise ValueError("Own queued reminder lacks a submission identity")
+                if queue_id not in identities:
+                    identities.add(queue_id)
+                    candidates.append((queue_id, submission))
+            cursor = page.get("nextCursor")
+            if cursor is None:
+                break
+            if not isinstance(cursor, str) or not cursor or cursor in cursors:
+                raise ValueError("Queue listing has an invalid pagination cursor")
+            cursors.add(cursor)
+        # Finish pagination before deleting; deletion can shift later page offsets.
+        for queue_id, submission in candidates:
+            state["pending"] = {"queue_id": queue_id, "client_user_message_id": submission}
+            store.save(job)
+            result = client.rpc(
+                "thread/queue/delete",
+                {"threadId": job["thread_id"], "queuedSubmissionId": queue_id},
+            )
+            if not isinstance(result.get("deleted"), bool):
+                raise ValueError("Queue deletion lacks a definite outcome")
+            state["removed" if result["deleted"] else "not_pending"].append(submission)
+            state.pop("pending")
+            store.save(job)
+        state["status"] = "completed"
+    except RpcError as exc:
+        state.update(status="rejected", error=str(exc)[:1000])
+    except Exception as exc:
+        state.update(
+            status="uncertain" if "pending" in state else "failed",
+            error=f"{type(exc).__name__}: {exc}"[:1000],
+        )
+    store.save(job)
+
+
 def settle_reminder(store, job):
     """Under the job lock, retain one receipt and advance on the original time grid."""
     if not pending_timer(job):
@@ -460,6 +532,12 @@ def settle_reminder(store, job):
     elif job["delivery"]["status"] not in DELIVERY_TERMINAL:
         return job
     else:
+        if replacement := job["delivery"].get("queue_replacement"):
+            if replacement["status"] == "running":
+                replacement.update(
+                    status="uncertain" if "pending" in replacement else "incomplete",
+                    error="Worker stopped during queue cleanup; the new input remains accepted.",
+                )
         receipt = {
             "job_id": job["id"],
             "index": index,
@@ -475,6 +553,16 @@ def settle_reminder(store, job):
     timer["completed"] += 1
     bucket = "failed" if status == "rejected" else status
     timer[bucket] += 1
+    if replacement := job["delivery"].get("queue_replacement"):
+        removed = len(replacement["removed"])
+        timer["replaced"] = timer.get("replaced", 0) + removed
+        timer["last_queue_replacement"] = {
+            "status": replacement["status"],
+            "removed": removed,
+            "not_pending": len(replacement["not_pending"]),
+        }
+        if "error" in replacement:
+            timer["last_queue_replacement"]["error"] = replacement["error"]
     if pending_timer(job):
         job["scheduled_at"] = (
             absolute_time(job["scheduled_at"]) + timedelta(seconds=timer["interval_seconds"])
@@ -569,9 +657,14 @@ def deliver(store, factory, job_id):
                         delivery["turn_id"] = identity
                     delivery.update(status="accepted", accepted_at=timestamp())
                     store.save(job)
+                    if job.get("timer", {}).get("replace_pending"):
+                        replace_queued_reminders(client, store, job)
                     return settle_reminder(store, job), 0
         except Exception as exc:
-            if delivery["status"] == "dispatching":
+            if delivery["status"] == "accepted":
+                delivery["error"] = f"{type(exc).__name__}: {exc}"[:1000]
+                code = 0
+            elif delivery["status"] == "dispatching":
                 delivery.update(status="uncertain", error=f"{type(exc).__name__}: {exc}"[:1000])
                 code = 0
             elif isinstance(exc, ToolError) and not exc.retryable:

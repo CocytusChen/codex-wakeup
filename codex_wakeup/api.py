@@ -53,10 +53,11 @@ def validate(operation, arguments):
         trigger = dict(arguments["trigger"]) if isinstance(arguments["trigger"], dict) else None
         kind = trigger.get("type") if trigger is not None else None
         if kind == "timer":
-            object_fields(trigger, {"type", "after", "at", "count"})
+            object_fields(trigger, {"type", "after", "at", "count", "replace_pending"})
             count = trigger.get("count", 1)
             if isinstance(count, bool) or not isinstance(count, int) or count < 1:
                 raise ToolError("invalid_count", "Timer count must be a positive integer.")
+            boolean(trigger.get("replace_pending", False))
             for key in {"after", "at"} & set(trigger):
                 if trigger[key] is not None and not isinstance(trigger[key], str):
                     raise ToolError("invalid_arguments", "Timer times must be strings.")
@@ -102,6 +103,14 @@ def validate(operation, arguments):
         busy = arguments.get("busy", "queue")
         if not isinstance(busy, str) or busy not in {"queue", "steer"}:
             raise ToolError("invalid_busy", "Busy policy must be queue or steer.")
+        if (
+            kind == "timer"
+            and trigger.get("replace_pending", False)
+            and (trigger.get("count", 1) <= 1 or busy != "queue")
+        ):
+            raise ToolError(
+                "invalid_replace_pending", "replace_pending requires count > 1 and busy=queue."
+            )
         return {
             "message": arguments["message"],
             "trigger": trigger,
@@ -168,10 +177,14 @@ def job_summary(job):
             for key in ("count", "completed", "accepted", "failed", "uncertain", "cancelled")
         }
         summary["timer"].update(
+            replace_pending=timer.get("replace_pending", False),
+            replaced=timer.get("replaced", 0),
             remaining=timer["count"] - timer["completed"] - timer["cancelled"],
             next_at=job["scheduled_at"] if is_active_job(job) else None,
             receipts_directory=timer["receipts_directory"],
         )
+        if "last_queue_replacement" in timer:
+            summary["timer"]["last_queue_replacement"] = timer["last_queue_replacement"]
     return summary
 
 
@@ -197,6 +210,7 @@ def execute(operation, arguments, *, thread, state_dir, socket_path=None):
                 after=trigger.get("after"),
                 at=trigger.get("at"),
                 count=trigger.get("count", 1),
+                replace_pending=trigger.get("replace_pending", False),
                 **options,
             )
         else:

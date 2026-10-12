@@ -54,6 +54,17 @@ and a retained receipt. Failed or uncertain occurrences are counted separately;
 an uncertain occurrence is never resubmitted. Later scheduled occurrences continue.
 Use the same job ID to query progress or cancel the remaining reminders.
 
+Optional `replace_pending: true` requires `count > 1` and `busy: "queue"`.
+After Codex accepts a new reminder, the tool removes older still-queued reminders
+of this same job and conversation. Default `false` retains every reminder.
+An already dispatched reminder is not recalled or interrupted; other jobs and
+user messages are untouched. Accepted counts retain the original submissions;
+`timer.replaced` counts confirmed queue removals. Cleanup is best effort: failures
+or uncertainty are recorded separately and do not resend the accepted new input.
+Queue listing/deletion and submission are separate operations, so a dispatch race
+can still start an older reminder. Each new occurrence checks the queue once,
+with pagination as needed; the tool does not poll between reminders.
+
 ### Command
 
 ```json
@@ -145,6 +156,8 @@ Each compact job reports:
 - Repeated timers also include `timer`: configured count, completed/accepted/failed/
   uncertain/cancelled counts, remaining count, next scheduled time and receipt path.
   Completed counts settled reminder attempts, not completed model tasks.
+  `replace_pending` records the selected policy; `replaced` counts confirmed old
+  queue removals. When used, `last_queue_replacement` reports cleanup status/counts.
 
 Accepted native queue submission settles that occurrence even if Codex has not yet
 executed its input. Repeated timers with remaining reminders stay active. Records and files remain available; the list filter does not

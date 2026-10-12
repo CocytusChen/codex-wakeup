@@ -22,6 +22,13 @@ class TimerTrigger(BaseModel):
     after: str | None = None
     at: str | None = None
     count: int = Field(default=1, ge=1, description="Number of reminders; count>1 requires after.")
+    replace_pending: bool = Field(
+        default=False,
+        description=(
+            "After acceptance, remove older queued reminders of this series; "
+            "requires count>1 and queue."
+        ),
+    )
 
 
 class CommandTrigger(BaseModel):
@@ -49,6 +56,7 @@ def create_server(state_dir=None, socket_path=None):
             "Wake only your calling conversation; Codex supplies its identity. "
             "Submit once, then end your turn to wait. queue delegates delivery to Codex; "
             "steer redirects its current turn. Timer count repeats on a fixed schedule. "
+            "Timer replace_pending removes only older still-queued reminders of that series. "
             "Cancel pending reminders; a single job ends on accepted submission. "
             "Output defaults to 1024 bytes; "
             "overflow saves all output. "
@@ -96,6 +104,8 @@ def create_server(state_dir=None, socket_path=None):
         timer: after (2m/1h) or future ISO8601 at with UTC offset, exactly one.
         count defaults to 1; after=1h,count=10 fires at hours 1 through 10 under one job.
         count>1 requires after; reminders follow the original schedule without interval drift.
+        replace_pending=true requires count>1 and queue; after accepting a new reminder,
+        remove older still-queued reminders of this same job, without interrupting active work.
         command: argv and absolute cwd, optional timeout_seconds; default 1024 BYTES inline.
         Overflow saves COMPLETE output; file mode always saves it. process_exit: existing local PID.
         queue (default): native queued input; worker exits after the final scheduled reminder.
