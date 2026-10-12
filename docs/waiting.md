@@ -6,17 +6,24 @@ proof that the entire task succeeded.
 
 ## Local observation
 
-Validate an owner and running process:
+Inspect an owner and process:
 
 ```sh
 codex-wakeup-wait probe --thread OWNER_THREAD --pid 12345
 ```
+
+`probe` returns the current observation, including `process: null` when the PID
+is gone or state `Z` for a zombie. Neither is an observation error.
 
 Wait for its exact PID/start/boot identity to end:
 
 ```sh
 codex-wakeup-wait wait --thread OWNER_THREAD --pid 12345
 ```
+
+`wait` requires a live process at its initial check. Later disappearance, zombie
+state or replacement of that identity returns `original_process_ended`, with
+business success still unassessed. This also applies to SSH observation.
 
 Use `--turn EXACT_TURN_ID` to observe a delegated Codex turn. At least one of
 `--turn` or `--pid` is required; with both, either event ends the wait. Observe the

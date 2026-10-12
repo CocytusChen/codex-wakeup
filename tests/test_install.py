@@ -9,6 +9,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from codex_wakeup import __version__
+
 
 class InstallationTest(unittest.TestCase):
     def setUp(self):
@@ -93,7 +95,7 @@ else:
                 "add",
                 "codex_wakeup",
                 "--env",
-                "CODEX_WAKEUP_VERSION=0.5.0",
+                f"CODEX_WAKEUP_VERSION={__version__}",
                 "--",
                 str(self.installed / "codex-wakeup-mcp"),
             ],

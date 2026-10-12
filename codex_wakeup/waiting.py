@@ -124,8 +124,10 @@ def main():
                 "Exact turn or PID, interval5..3600s and a positive optional PID required."
             )
         initial = snapshot(args)
-        if args.pid is not None and (
-            initial["process"] is None or initial["process"]["state"] == "Z"
+        if (
+            args.action == "wait"
+            and args.pid is not None
+            and (initial["process"] is None or initial["process"]["state"] == "Z")
         ):
             raise ValueError("Monitored process must be running at preflight.")
         result = initial
