@@ -40,6 +40,9 @@ waits and Codex message delivery.
 - Keep stdout to one JSON object per operation; `--help` is the text exception.
 - Source work and deployment are separate. Register, reload or replace installed
   services only when requested.
+- Upgrade installations manually only when no active jobs use them. A shared
+  installation requires checking all calling conversations. Preserve settled
+  job records during an upgrade.
 - Exclude job state, credentials, personal notes, logs, caches and local deployment
   scripts from source archives.
 

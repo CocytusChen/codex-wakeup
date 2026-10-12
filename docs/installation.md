@@ -84,6 +84,13 @@ An existing daemon can be older than the CLI; `codex app-server daemon version`
 shows both. If necessary, update it through Codex's normal workflow after existing
 work settles. Adding MCP configuration does not upgrade a running daemon.
 
+## Updating
+
+Update manually after all active jobs using the installation have finished.
+For a shared installation, check each calling conversation's `list_jobs`, which
+is scoped to that caller. Settled job history can remain; keep the state directory
+when reinstalling. Then refresh the MCP connection before creating new jobs.
+
 ## Manual installation and configuration
 
 With `uv` already installed, the equivalent package and registration steps are:
