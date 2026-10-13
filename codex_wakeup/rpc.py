@@ -54,7 +54,7 @@ class RpcClient:
                 or values.get("sec-websocket-accept", "").strip() != expected
             ):
                 raise ConnectionError("WebSocket handshake rejected")
-            self.rpc(
+            self.initialize_result = self.rpc(
                 "initialize",
                 {
                     "clientInfo": {"name": "codex-wakeup", "version": __version__},

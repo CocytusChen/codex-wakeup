@@ -109,7 +109,14 @@ def inspect_thread(client, thread_id, *, read_active=True):
     if not isinstance(cwd, str) or not Path(cwd).is_dir() or not os.access(cwd, os.R_OK | os.X_OK):
         raise ToolError("invalid_cwd", "Target cwd must exist and be accessible on this host.")
     active = next((turn for turn in turns if turn.get("status") == "inProgress"), None)
-    return {"id": thread_id, "name": thread.get("name"), "cwd": cwd, "status": state}, active
+    return {
+        "id": thread_id,
+        "name": thread.get("name"),
+        "cwd": cwd,
+        "status": state,
+        "cli_version": thread.get("cliVersion"),
+        "has_completed_turn": any(turn.get("status") == "completed" for turn in turns),
+    }, active
 
 
 def atomic_json(path, value):
@@ -573,6 +580,89 @@ def settle_reminder(store, job):
     return job
 
 
+def persisted_settings_resume_supported(client, target):
+    """Older servers/threads lack the persisted permission-profile resume contract."""
+    hello = getattr(client, "initialize_result", {})
+    agent = hello.get("userAgent", "") if isinstance(hello, dict) else ""
+    match = re.match(r"^[^/]+/(\d+)\.(\d+)\.(\d+)(?:\s|$)", agent)
+    version = re.fullmatch(r"(\d+)\.(\d+)\.(\d+)", target.get("cli_version") or "")
+    return bool(
+        match
+        and version
+        and target.get("has_completed_turn")
+        and tuple(map(int, match.groups())) >= (0, 149, 0)
+        and tuple(map(int, version.groups())) >= (0, 149, 0)
+    )
+
+
+def start_queued_if_idle(store, client, job):
+    """Start exactly the accepted input using Codex's saved settings and idle guard."""
+    delivery = job["delivery"]
+    try:
+        target, active = inspect_thread(client, job["thread_id"])
+    except Exception as exc:
+        delivery["error"] = f"Queued input accepted; idle check failed: {exc}"[:1000]
+        store.save(job)
+        return
+    if target["status"].get("type") == "notLoaded":
+        if not persisted_settings_resume_supported(client, target):
+            delivery["error"] = (
+                "Queued input accepted, but this server/thread lacks a verified completed-turn "
+                "saved permission profile. Open the conversation in Codex before starting it."
+            )
+            store.save(job)
+            return
+        try:
+            client.rpc("thread/resume", {"threadId": job["thread_id"], "excludeTurns": True})
+            target, active = inspect_thread(client, job["thread_id"])
+        except Exception as exc:
+            delivery["error"] = f"Queued input accepted; restoring its session failed: {exc}"[:1000]
+            store.save(job)
+            return
+        if target["status"].get("type") == "notLoaded":
+            delivery["error"] = "Queued input accepted; Codex did not load the conversation."
+            store.save(job)
+            return
+    if active or target["status"].get("type") == "active":
+        return
+    delivery["queue_start"] = {"status": "dispatching", "dispatched_at": timestamp()}
+    delivery["status"] = "dispatching"
+    store.save(job)
+    try:
+        result = client.rpc(
+            "thread/queue/start",
+            {"threadId": job["thread_id"], "queuedSubmissionId": delivery["queue_id"]},
+        )
+    except RpcError as exc:
+        delivery["status"] = "accepted"
+        delivery["queue_start"].update(status="rejected", error=str(exc))
+        # Native start-if-idle refuses a racing active turn without consuming the input.
+        if str(exc) != "thread already has an active or pending turn":
+            delivery["error"] = f"Queued input accepted; starting it was refused: {exc}"[:1000]
+        store.save(job)
+        return
+    except Exception as exc:
+        delivery["status"] = "uncertain"
+        delivery["queue_start"].update(
+            status="uncertain", error=f"{type(exc).__name__}: {exc}"[:1000]
+        )
+        delivery["error"] = "Queued input accepted; its start outcome is unknown. Do not resend."
+        store.save(job)
+        return
+    identity = result.get("turnId") or result.get("turn", {}).get("id")
+    if not isinstance(identity, str) or not identity:
+        delivery["status"] = "uncertain"
+        delivery["queue_start"].update(
+            status="uncertain", error="Start reply lacks a turn identity"
+        )
+        delivery["error"] = "Queued input accepted; its start outcome is unknown. Do not resend."
+    else:
+        delivery["status"] = "accepted"
+        delivery["turn_id"] = identity
+        delivery["queue_start"].update(status="started", accepted_at=timestamp(), turn_id=identity)
+    store.save(job)
+
+
 def deliver(store, factory, job_id):
     with store.lock(job_id):
         job = store.read(job_id)
@@ -584,6 +674,8 @@ def deliver(store, factory, job_id):
         delivery = job["delivery"]
         if delivery["status"] == "dispatching":
             delivery.update(status="uncertain", error="Previous worker stopped during submission.")
+            if delivery.get("queue_start", {}).get("status") == "dispatching":
+                delivery["queue_start"].update(status="uncertain", error=delivery["error"])
             store.save(job)
         if delivery["status"] in DELIVERY_TERMINAL:
             return settle_reminder(store, job), 0
@@ -599,7 +691,7 @@ def deliver(store, factory, job_id):
         try:
             with factory(job["socket"]) as client:
                 for race in range(2):
-                    # A queue submission does not query/poll the active turn.
+                    # Queue once; after acceptance, inspect once and start if idle.
                     if job["busy"] in {"queue", "defer"}:
                         method = "thread/queue/add"
                         params = {
@@ -659,6 +751,8 @@ def deliver(store, factory, job_id):
                     store.save(job)
                     if job.get("timer", {}).get("replace_pending"):
                         replace_queued_reminders(client, store, job)
+                    if method == "thread/queue/add":
+                        start_queued_if_idle(store, client, job)
                     return settle_reminder(store, job), 0
         except Exception as exc:
             if delivery["status"] == "accepted":

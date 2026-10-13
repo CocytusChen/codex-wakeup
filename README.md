@@ -57,7 +57,9 @@ Add `"replace_pending": true` to the trigger to replace older queued reminders o
 that series after each new reminder is accepted. Active work is never interrupted.
 After submission, end your turn when ready to wait. The tool handles delivery.
 Each operation acts only on the calling conversation's jobs.
-`queue` is the default; `steer` redirects active work through native Codex steering.
+`queue` starts your queued message when idle and queues it when busy.
+It restores supported unloaded sessions using Codex's saved settings, without overrides.
+`steer` redirects active work through native Codex steering.
 
 CLI accepts the same JSON arguments inside a Codex shell:
 

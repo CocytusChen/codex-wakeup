@@ -344,7 +344,11 @@ class ReplacementTest(unittest.TestCase):
         self.assertEqual(self.client.queued[:-1], others)
         methods = [method for method, _ in self.client.calls]
         self.assertEqual(
-            methods, ["thread/queue/add"] + ["thread/queue/list"] * 3 + ["thread/queue/delete"] * 2
+            methods,
+            ["thread/queue/add"]
+            + ["thread/queue/list"] * 3
+            + ["thread/queue/delete"] * 2
+            + ["thread/read", "thread/turns/list", "thread/queue/start"],
         )
 
     def test_invalid_replacement_policy_creates_no_worker(self):

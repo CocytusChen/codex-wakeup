@@ -1,6 +1,6 @@
 [project]
 name = "codex-wakeup"
-version = "0.5.1"
+version = "0.5.2"
 description = "Validated timer, command and process-exit wake-ups, with CLI and MCP"
 readme = "README.md"
 requires-python = ">=3.11"

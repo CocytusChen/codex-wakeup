@@ -25,6 +25,7 @@ class FakeDaemon:
         self.sent = []
         self.calls = []
         self.queued, self.deleted = [], []
+        self.started = []
         self.active = True
         self.stop = threading.Event()
         self.socket = socket.socket(socket.AF_UNIX)
@@ -134,6 +135,20 @@ class FakeDaemon:
                         self.queued.remove(item)
                         self.deleted.append(item)
                     result = {"deleted": bool(item)}
+                elif method == "thread/queue/start":
+                    params = message["params"]
+                    item = next(
+                        q
+                        for q in self.queued
+                        if q["threadId"] == params["threadId"]
+                        and q["id"] == params["queuedSubmissionId"]
+                    )
+                    if self.active:
+                        raise AssertionError("Fixture cannot start while busy")
+                    self.queued.remove(item)
+                    self.started.append(item)
+                    self.active = True
+                    result = {"turn": {"id": "test-turn-completion"}}
                 elif method == "turn/steer":
                     self.sent.append(message)
                     result = {"turnId": "fake-active"}
@@ -283,10 +298,24 @@ class DetachedJobTest(unittest.TestCase):
         self.assertEqual(len(self.daemon.sent), 1)
         self.assertEqual(self.daemon.sent[0]["method"], "thread/queue/add")
         self.assertEqual(result["execution"]["exit_code"], 0)
-        self.assertNotIn("thread/turns/list", self.daemon.calls)
+        self.assertEqual(self.daemon.calls.count("thread/turns/list"), 1)
+        self.assertNotIn("thread/queue/start", self.daemon.calls)
         self.assertEqual(self.cli("list_jobs", {"job": job})["jobs"], [])
         self.assertFalse(self.cli("cancel_job", {"job": job})["cancelled"])
         self.assertEqual(len(self.daemon.sent), 1)
+
+    def test_detached_queue_starts_idle_target_once_without_another_user_message(self):
+        self.daemon.active = False
+        job = self.command("print('ready')")
+        result = self.wait_for(job, lambda v: bool(v["delivery"].get("turn_id")))
+        self.wait_for(job, lambda v: not self.worker_alive(v))
+        self.assertEqual(result["delivery"]["turn_id"], "test-turn-completion")
+        self.assertEqual(len(self.daemon.sent), 1)
+        self.assertEqual(len(self.daemon.started), 1)
+        self.assertFalse(self.daemon.queued)
+        self.assertTrue(self.daemon.active)
+        self.assertNotIn("turn/steer", self.daemon.calls)
+        self.assertNotIn("thread/resume", self.daemon.calls)
 
     def test_timer_cancel_before_fire_never_enqueues(self):
         job = self.submit({"type": "timer", "after": "1h"})

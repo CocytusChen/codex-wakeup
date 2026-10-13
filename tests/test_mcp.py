@@ -265,7 +265,8 @@ class MCPTest(unittest.TestCase):
                     self.assertEqual(value["timer"]["accepted"], 3)
                     self.assertEqual(len(daemon.sent), 3)
                     self.assertTrue(daemon.active)
-                    self.assertNotIn("thread/turns/list", daemon.calls)
+                    self.assertEqual(daemon.calls.count("thread/turns/list"), 3)
+                    self.assertNotIn("thread/queue/start", daemon.calls)
                 finally:
                     if job:
                         from codex_wakeup.api import call
@@ -337,7 +338,8 @@ class MCPTest(unittest.TestCase):
                     self.assertEqual(len(daemon.sent), 1)
                     self.assertIn("small result", daemon.sent[0]["params"]["input"][0]["text"])
                     self.assertEqual(daemon.sent[0]["method"], "thread/queue/add")
-                    self.assertNotIn("thread/turns/list", daemon.calls)
+                    self.assertEqual(daemon.calls.count("thread/turns/list"), 1)
+                    self.assertNotIn("thread/queue/start", daemon.calls)
                 finally:
                     daemon.close()
 

@@ -54,7 +54,8 @@ def create_server(state_dir=None, socket_path=None):
         "codex-wakeup",
         instructions=(
             "Wake only your calling conversation; Codex supplies its identity. "
-            "Submit once, then end your turn to wait. queue delegates delivery to Codex; "
+            "Submit once, then end your turn to wait. queue starts idle work and queues busy work; "
+            "supported unloaded sessions restore Codex's saved settings without overrides. "
             "steer redirects its current turn. Timer count repeats on a fixed schedule. "
             "Timer replace_pending removes only older still-queued reminders of that series. "
             "Cancel pending reminders; a single job ends on accepted submission. "
@@ -108,7 +109,9 @@ def create_server(state_dir=None, socket_path=None):
         remove older still-queued reminders of this same job, without interrupting active work.
         command: argv and absolute cwd, optional timeout_seconds; default 1024 BYTES inline.
         Overflow saves COMPLETE output; file mode always saves it. process_exit: existing local PID.
-        queue (default): native queued input; worker exits after the final scheduled reminder.
+        queue (default): enqueue once, then start if idle; busy work stays queued.
+        Supported unloaded sessions restore saved settings, without permission overrides.
+        Unknown/older restore contracts stay queued with an error. Uncertain starts never resend.
         steer: native Codex steering, which may preempt current inference; idle starts a turn.
         dry_run validates without storing a job or starting work. No default execution deadline.
         """

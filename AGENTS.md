@@ -14,9 +14,13 @@ waits and Codex message delivery.
 - Lists default to active jobs. `include_completed` exposes settled history.
   Keep routine results compact and preserve uncertain records for inspection.
 - Validate trigger, endpoint, conversation, paths and output handling before work.
-- Default queue delivery hands each input to Codex. Single jobs exit on acceptance;
-  finite timers retain one worker through their original schedule. Steer
-  delegates active-turn redirection to Codex. Do not poll for idle queue delivery.
+- Default queue delivery enqueues once, checks state once, and uses native
+  start-if-idle on that exact input. Busy work stays queued. Restore supported
+  unloaded sessions with Codex's persisted settings and no overrides; never send
+  permission, approval, model or configuration fields. Older/unverifiable resume
+  contracts stay queued with an explicit error. No idle polling or uncertain replay.
+  Single jobs exit on acceptance; finite timers retain their original schedule.
+  Steer delegates active-turn redirection to Codex.
 - Optional repeated-timer `replace_pending` removes only older queued inputs of
   the same job after new acceptance. Preserve deletion uncertainty; never recall
   active work or delete unrelated input. Accepted submission remains settled.

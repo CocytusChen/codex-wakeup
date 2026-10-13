@@ -53,16 +53,25 @@ Both interfaces return one JSON result with `ok`, `tool`, and either `data` or
 
 | `busy` | Delivery |
 |---|---|
-| `queue` (default) | Submit through native `thread/queue/add`. Codex dispatches the queued input when eligible. |
+| `queue` (default) | Enqueue once, then start that exact input with native `thread/queue/start` when idle. Busy work stays queued. |
 | `steer` | Use native `turn/steer` for an active turn, or `turn/start` when idle. |
 
 Queue acceptance settles the occurrence. For a single job the worker exits; a
 repeated timer waits until the next original scheduled time and exits after the
 last occurrence. The worker
-does not poll for an idle turn. Codex owns subsequent dispatch: normal turn
-completion can run queued input, while an interrupted turn or unloaded
-conversation can retain it until Codex resumes processing. Acceptance is not proof
-that the model ran the message or finished the requested task.
+does not poll for an idle turn. After acceptance it checks the conversation once.
+Native start-if-idle refuses a racing active or pending turn without interrupting
+it. A successful start adds the returned turn ID to the receipt. Busy inputs remain
+in Codex's queue for subsequent dispatch; acceptance is not task completion.
+
+Supported unloaded conversations are restored using `thread/resume` with only the
+thread ID and `excludeTurns: true`. Codex restores its own persisted settings;
+the tool supplies no permission, approval, sandbox, model or configuration overrides.
+Automatic restoration requires both server and saved-thread version 0.149.0+
+and a completed saved turn with the persisted permission-profile contract.
+Empty sessions and older or unknown contracts stay queued with an explicit error.
+A refused start retains its accepted queued input;
+a lost start reply is uncertain and is never retried or resubmitted.
 
 Repeated timers can opt into `replace_pending`. After a new queue acceptance is
 saved, the worker lists the queue and deletes only older submission identities of

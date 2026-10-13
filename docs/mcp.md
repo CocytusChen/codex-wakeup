@@ -116,8 +116,12 @@ Success returns `data.job.id`, `data.dry_run` and `data.validation_passed`. A dr
 starts no worker and stores no queryable job. Ordinary submission returns after
 worker startup. End your turn when ready to wait.
 
-`queue` delegates to Codex's native queue and settles each reminder on accepted enqueue;
-subsequent model execution belongs to Codex. A repeated timer stays active until
+`queue` enqueues once, then checks state once and actively starts its exact queued
+input if idle. Busy input stays queued; a racing active turn is not interrupted.
+Supported unloaded sessions restore Codex's persisted settings without overrides;
+older/unknown restore contracts stay queued with an error. Successful starts include
+a turn ID; an uncertain start is never resent. Task completion is separate.
+A repeated timer stays active until
 its final occurrence settles or its remainder is cancelled. `steer` calls native steering when
 active and starts a turn when idle. It may preempt inference within the active
 turn; exact handling belongs to Codex. Steering requires a loaded conversation.

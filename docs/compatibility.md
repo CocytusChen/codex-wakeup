@@ -31,6 +31,8 @@ replaying it.
 | `initialize.capabilities.experimentalApi: true` | Enable experimental queue methods. |
 | `thread/read`, `thread/turns/list` with bounded `itemsView: "notLoaded"` | Validate conversations and inspect an active turn for steering. |
 | `thread/queue/list`, `thread/queue/add` | Validate and submit native queued input. |
+| `thread/queue/start` with selected `queuedSubmissionId` and returned `turn.id` | Atomically start only the accepted input when idle. |
+| No-override `thread/resume` on server and saved thread 0.149.0+, with a completed saved turn | Restore an unloaded conversation using Codex's persisted approval and permission profile. Empty/older/unknown contracts remain queued with an error. |
 | `thread/queue/delete` with `queuedSubmissionId` and boolean `deleted` | Optional repeated-timer replacement of older queued reminders. |
 | Queue add's `clientUserMessageId` and matching `queuedSubmission` receipt | Bind acceptance to the submitted job. |
 | `turn/steer` with `expectedTurnId`, or idle `turn/start` | Native steering delivery. |

@@ -97,7 +97,7 @@ With `uv` already installed, the equivalent package and registration steps are:
 
 ```sh
 uv tool install --python 3.12 '.[mcp]'
-codex mcp add codex_wakeup --env CODEX_WAKEUP_VERSION=0.5.1 -- "$(uv tool dir --bin)/codex-wakeup-mcp"
+codex mcp add codex_wakeup --env CODEX_WAKEUP_VERSION=0.5.2 -- "$(uv tool dir --bin)/codex-wakeup-mcp"
 codex mcp get codex_wakeup
 ```
 

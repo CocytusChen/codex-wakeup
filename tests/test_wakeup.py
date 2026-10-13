@@ -22,6 +22,13 @@ class FakeClient:
     def __init__(self, cwd):
         self.cwd, self.active, self.loaded, self.exists = cwd, None, True, True
         self.failure, self.race, self.queue_available = None, False, True
+        self.start_failure, self.start_race, self.start_response = None, False, None
+        self.started_queue_ids = []
+        self.cli_version = "0.162.1"
+        self.initialize_result = {"userAgent": "Codex/0.162.1 (fixture)"}
+        self.saved_permissions = {"approvalPolicy": "never", "permissionProfile": "read-only"}
+        self.permissions = dict(self.saved_permissions)
+        self.has_completed_turn = True
         self.sent, self.calls = [], []
 
     def __enter__(self):
@@ -38,17 +45,42 @@ class FakeClient:
             return {
                 "thread": {
                     "cwd": self.cwd,
+                    "cliVersion": self.cli_version,
                     "status": {
                         "type": "active" if self.active else "idle" if self.loaded else "notLoaded"
                     },
                 }
             }
         if method == "thread/turns/list":
-            return {"data": [{"id": self.active, "status": "inProgress"}] if self.active else []}
+            return {
+                "data": [{"id": self.active, "status": "inProgress"}]
+                if self.active
+                else [{"id": "previous-turn", "status": "completed"}]
+                if self.has_completed_turn
+                else []
+            }
         if method == "thread/queue/list":
             if not self.queue_available:
                 raise RpcError({"message": "unsupported queue"})
             return {"data": []}
+        if method == "thread/queue/start":
+            if self.start_race:
+                self.active = "racing-turn"
+                raise RpcError({"message": "thread already has an active or pending turn"})
+            if self.start_failure:
+                raise self.start_failure
+            self.started_queue_ids.append(params["queuedSubmissionId"])
+            return (
+                self.start_response
+                if self.start_response is not None
+                else {"turn": {"id": "new-turn"}}
+            )
+        if method == "thread/resume":
+            if set(params) != {"threadId", "excludeTurns"}:
+                raise AssertionError("Resume must have no settings overrides")
+            self.loaded = True
+            self.permissions = dict(self.saved_permissions)
+            return {"thread": {"id": params["threadId"]}, **self.permissions}
         self.sent.append((method, params))
         if self.race:
             self.race = False
@@ -155,17 +187,122 @@ class WakeupTest(unittest.TestCase):
         for active, loaded in [("busy-turn", True), (None, False)]:
             with self.subTest(active=active):
                 self.client.active, self.client.loaded = active, loaded
+                self.client.cli_version = "0.162.1" if loaded else "0.148.0"
                 job = self.due()
                 self.client.calls.clear()
                 sleeps = []
                 result = wait_for_job(
                     self.store, lambda _p: self.client, job["id"], sleeper=sleeps.append
                 )
-                self.assertEqual([m for m, _ in self.client.calls], ["thread/queue/add"])
+                self.assertEqual(
+                    [m for m, _ in self.client.calls],
+                    ["thread/queue/add", "thread/read", "thread/turns/list"],
+                )
                 self.assertFalse(sleeps)
                 self.assertEqual(result["delivery"]["status"], "accepted")
                 self.assertEqual(result["delivery"]["queue_id"], "native-queue-item")
                 self.assertEqual(self.client.loaded, loaded)
+                self.assertFalse(self.client.started_queue_ids)
+                if not loaded:
+                    self.assertIn("saved permission profile", result["delivery"]["error"])
+
+    def test_unloaded_resumes_saved_settings_without_overrides_then_starts(self):
+        job = self.due()
+        self.client.loaded = False
+        self.client.calls.clear()
+        before = dict(self.client.permissions)
+        result, _ = deliver(self.store, lambda _p: self.client, job["id"])
+        methods = [m for m, _ in self.client.calls]
+        self.assertIn("thread/resume", methods)
+        self.assertEqual(methods[-1], "thread/queue/start")
+        self.assertTrue(self.client.loaded)
+        self.assertEqual(self.client.permissions, before)
+        self.assertEqual(result["delivery"]["turn_id"], "new-turn")
+        for _method, params in self.client.calls:
+            self.assertFalse(
+                set(params)
+                & {"approvalPolicy", "sandbox", "sandboxPolicy", "permissions", "config"}
+            )
+
+    def test_unloaded_old_or_unknown_server_never_changes_settings(self):
+        job = self.due()
+        self.client.loaded = False
+        self.client.initialize_result = {"userAgent": "Codex/0.148.0 (fixture)"}
+        result, _ = deliver(self.store, lambda _p: self.client, job["id"])
+        self.assertNotIn("thread/resume", [m for m, _ in self.client.calls])
+        self.assertFalse(self.client.loaded)
+        self.assertIn("saved permission profile", result["delivery"]["error"])
+
+    def test_empty_unloaded_session_is_not_restored_with_default_settings(self):
+        job = self.due()
+        self.client.loaded, self.client.has_completed_turn = False, False
+        result, _ = deliver(self.store, lambda _p: self.client, job["id"])
+        self.assertNotIn("thread/resume", [m for m, _ in self.client.calls])
+        self.assertIn("saved permission profile", result["delivery"]["error"])
+
+    def test_queue_idle_starts_exact_accepted_input_without_permission_arguments(self):
+        job = self.due()
+        self.client.calls.clear()
+        result, _ = deliver(self.store, lambda _p: self.client, job["id"])
+        self.assertEqual(
+            [m for m, _ in self.client.calls],
+            ["thread/queue/add", "thread/read", "thread/turns/list", "thread/queue/start"],
+        )
+        self.assertEqual(
+            self.client.calls[-1][1],
+            {"threadId": "existing-thread", "queuedSubmissionId": "native-queue-item"},
+        )
+        self.assertEqual(result["delivery"]["turn_id"], "new-turn")
+        self.assertEqual(result["delivery"]["queue_start"]["status"], "started")
+        self.assertEqual(len(self.client.sent), 1)
+        self.assertNotIn("thread/resume", [m for m, _ in self.client.calls])
+
+    def test_idle_to_busy_race_keeps_queue_without_interrupting_or_resending(self):
+        self.client.start_race = True
+        job = self.due()
+        result, _ = deliver(self.store, lambda _p: self.client, job["id"])
+        self.assertEqual(result["delivery"]["status"], "accepted")
+        self.assertEqual(self.client.active, "racing-turn")
+        self.assertEqual(len(self.client.sent), 1)
+        self.assertFalse(self.client.started_queue_ids)
+        self.assertNotIn("error", result["delivery"])
+
+    def test_lost_start_reply_never_resubmits_or_restarts_input(self):
+        self.client.start_failure = ConnectionError("Reply lost after possible start")
+        job = self.due()
+        result, _ = deliver(self.store, lambda _p: self.client, job["id"])
+        self.assertEqual(result["delivery"]["status"], "uncertain")
+        before = len(self.client.calls)
+        self.client.start_failure = None
+        deliver(self.store, lambda _p: self.client, job["id"])
+        self.assertEqual(len(self.client.calls), before)
+        self.assertEqual(len(self.client.sent), 1)
+
+    def test_definite_start_refusal_retains_queue_and_reports_error(self):
+        self.client.start_failure = RpcError({"message": "model provider unavailable"})
+        result, _ = deliver(self.store, lambda _p: self.client, self.due()["id"])
+        self.assertEqual(result["delivery"]["status"], "accepted")
+        self.assertIn("starting it was refused", result["delivery"]["error"])
+        self.assertEqual(result["delivery"]["queue_id"], "native-queue-item")
+
+    def test_malformed_start_reply_is_uncertain(self):
+        self.client.start_response = {}
+        result, _ = deliver(self.store, lambda _p: self.client, self.due()["id"])
+        self.assertEqual(result["delivery"]["status"], "uncertain")
+        self.assertNotIn("turn_id", result["delivery"])
+
+    def test_crash_during_queue_start_is_not_replayed(self):
+        job = self.due()
+        job["delivery"].update(
+            status="dispatching",
+            queue_id="native-queue-item",
+            queue_start={"status": "dispatching"},
+        )
+        self.store.save(job)
+        self.client.calls.clear()
+        result, _ = deliver(self.store, lambda _p: self.client, job["id"])
+        self.assertEqual(result["delivery"]["status"], "uncertain")
+        self.assertFalse(self.client.calls)
 
     def test_steer_uses_native_active_turn_and_idle_start(self):
         for active, expected in [("busy-turn", "turn/steer"), (None, "turn/start")]:
